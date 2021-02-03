@@ -1,0 +1,191 @@
+Frontend Login page code and backend code 
+Configure MySQL
+ 
+SQL queries for this project i am using MySQLWorkbench but you can also use whatever tool you want, as well as mysql command if you feel comfortable with it.
+
+The code below represent the mysql schema that we will need to create for our web project.
+
+CREATE DATABASE db_example; 
+CREATE USER 'tutorialuser'@'localhost' IDENTIFIED BY 'tutorialmy5ql';
+GRANT ALL PRIVILEGES ON *.* TO 'tutorialuser'@'localhost';
+FLUSH PRIVILEGES;
+
+CREATE TABLE `user` (
+  `user_id` int(11) NOT NULL AUTO_INCREMENT,
+  `active` int(11) DEFAULT NULL,
+  `email` varchar(255) NOT NULL,
+  `last_name` varchar(255) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  PRIMARY KEY (`user_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8;
+
+
+CREATE TABLE `role` (
+  `role_id` int(11) NOT NULL AUTO_INCREMENT,
+  `role` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`role_id`)
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;
+
+
+CREATE TABLE `user_role` (
+  `user_id` int(11) NOT NULL,
+  `role_id` int(11) NOT NULL,
+  PRIMARY KEY (`user_id`,`role_id`),
+  KEY `FKa68196081fvovjhkek5m97n3y` (`role_id`),
+  CONSTRAINT `FK859n2jvi8ivhui0rl0esws6o` FOREIGN KEY (`user_id`) REFERENCES `user` (`user_id`),
+  CONSTRAINT `FKa68196081fvovjhkek5m97n3y` FOREIGN KEY (`role_id`) REFERENCES `role` (`role_id`)
+
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+Don't Forget to insert roles to the users before to continue in the next step. Build&Deploy
+
+INSERT INTO `role` VALUES (1,'ADMIN');
+INSERT INTO `role` VALUES (2,'USER');
+
+
+
+Build and Deploy
+$ cd github-maven-example/example
+$ mvn clean install
+This is a Spring Boot project, so you can deploy it by simply using the main class: Application.java
+
+The compiled, source, and Javadoc WAR files will be placed in your target folder just simple ran the coomand below .
+SpringBoot-Registration-Login
+
+
+
+SpringDataJPA
+
+@Repository("roleRepository")
+public interface RoleRepository extends JpaRepository<Role, Integer> {
+   Role findByRole(String role);
+   
+@Repository("userRepository")
+public interface UserRepository extends JpaRepository<User, Long> {
+   User findByEmail(String email);
+}
+
+}
+
+
+
+SecurityPerspective and  AuthenticationProviders code
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    @Autowired
+    private BCryptPasswordEncoder bCryptPasswordEncoder;
+
+    @Autowired
+    private AuthenticationSuccessHandler successHandler;
+
+    @Autowired
+    private AuthenticationFailureHandler authenticationFailureHandler;
+
+
+    @Autowired
+    private DataSource dataSource;
+
+    @Value("${spring.queries.users-query}")
+    private String usersQuery;
+
+    @Value("${spring.queries.roles-query}")
+    private String rolesQuery;
+
+    public SecurityConfig() {
+        super();
+    }
+
+    @Override
+    protected void configure(AuthenticationManagerBuilder auth)
+            throws Exception {
+        auth.
+                jdbcAuthentication()
+                .usersByUsernameQuery(usersQuery)
+                .authoritiesByUsernameQuery(rolesQuery)
+                .dataSource(dataSource)
+                .passwordEncoder(bCryptPasswordEncoder);
+
+    }
+ }
+
+PasswordEncoding
+ BCryptPasswordEncoder as a bean in our configuration:
+
+@Bean
+public PasswordEncoder passwordEncoder() {
+   return new BCryptPasswordEncoder();
+
+}
+
+
+
+Persistent
+we need to have the login information in the database – we need a table creating to hold the data:
+
+create table if not exists persistent_logins ( 
+  username varchar_ignorecase(100) not null, 
+  series varchar(64) primary key, 
+  token varchar(64) not null, 
+  last_used timestamp not null
+);
+Navigate in the Config class, and for the sake of completeness, here is the way persistence is set up:
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+
+        http.tokenRepository(persistentTokenRepository())
+              
+    }
+  @Bean
+    public PersistentTokenRepository persistentTokenRepository() {
+        JdbcTokenRepositoryImpl tokenRepositoryImpl = new JdbcTokenRepositoryImpl();
+        tokenRepositoryImpl.setDataSource(dataSource);
+        return tokenRepositoryImpl;
+    }
+@Override
+    protected void configure(HttpSecurity http) throws Exception {
+
+        http.essionManagement()
+                .sessionFixation().migrateSession()
+                .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
+                .invalidSessionUrl("/invalidSession")
+                .maximumSessions(1)
+                .expiredUrl("/invalidSession");
+              
+    }
+In addition we should also setup the SessionListener in order to be ready to handle callbacks from the methods sessionCreated(final HttpSessionEvent event) sessionDestroyed(final HttpSessionEvent event)
+
+public class SessionListenerWithMetrics extends HttpSessionEventPublisher {
+
+    private final AtomicInteger activeSessions;
+    private final AtomicInteger timeoutSessions;
+    private final Counter counterOfActiveSessions;
+    private int SessionTimeout = 1 * 50;
+
+    public SessionListenerWithMetrics() {
+        super();
+        activeSessions = new AtomicInteger();
+        timeoutSessions = new AtomicInteger();
+        counterOfActiveSessions = MetricRegistrySingleton.metrics.counter("web.sessions.active.count");
+     context.setSessionTrackingModes(EnumSet.of(SessionTrackingMode.COOKIE));
+    }
+
+    // API
+
+    @Override
+    public final void sessionCreated(final HttpSessionEvent event) {
+        activeSessions.incrementAndGet();
+        System.out.println("Session Created: ");
+        event.getSession().setMaxInactiveInterval(SessionTimeout);
+        timeoutSessions.set(event.getSession().getMaxInactiveInterval());
+        counterOfActiveSessions.inc();
+    }
+
+    @Override
+    public final void sessionDestroyed(final HttpSessionEvent event) {
+        activeSessions.decrementAndGet();
+        System.out.println("Session Destroyed: ");
+        counterOfActiveSessions.dec();
+    }
+ }
